@@ -1,0 +1,51 @@
+#!/usr/bin/env ruby
+require_relative '../lib/pool.rb'
+require_relative '../lib/machine.rb'
+require_relative '../lib/worker.rb'
+# project layout:
+# inputs
+#   job1 ... any filename
+#   job2
+# output
+#   job1 #this will be copied from ~user/output
+#     files written by job1
+#   job2.cpy #unfinished copy of job, will be retried when master is restarted
+# data
+#   some_file #additional files that your runner needs (libs, binaries whatever
+# config #contains a ssh config for client list
+# run #the script that is executed on the worker for each input
+# init #the script that is executed on the worker once to setup the worker
+# cleanup #the script that is executed on the worker after a worker is finished
+# aggregate #the script that will be executed on the master to aggregate all results after all jobs finished
+
+def aggregate(path_to_env,output)
+  aggregate_path = File.join(path_to_env, "aggregate")
+  system(aggregate_path, output) if File.exists?(aggregate_path)
+end
+
+def run(path_to_env)
+  pool = WorkPool.new(path_to_env)
+  Machine.get_all(path_to_env).each do |machine|
+    machine.num_workers.times do
+      Thread.new { run_worker_on_machine(path_to_env, machine, pool) }
+    end
+  end
+  Thread.list.each{|t| t.join unless t == Thread.current}
+  aggregate(path_to_env, pool.output)
+end
+
+def run_worker_on_machine(path_to_env, machine, pool)
+  worker = Worker.new(path_to_env, machine, pool)
+  worker.upload_environment
+  while (input = pool.take)
+    worker.run_input(input)
+    worker.download_result(input)
+  end
+ensure
+  worker.cleanup if worker
+end
+
+
+Thread.abort_on_exception = true
+fail 'usage master.rb path/to/project' unless ARGV.length == 1
+run(File.expand_path(ARGV[0]))

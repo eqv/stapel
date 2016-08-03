@@ -1,0 +1,3 @@
+#!/usr/bin/env ruby
+sum = Dir.glob(File.join(ARGV[0],"**/stdout")).inject(0){|s,e| s + File.read(e).to_i}
+puts "words total: #{sum}" 
